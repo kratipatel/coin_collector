@@ -46,6 +46,8 @@ class GameEngine:
         collected = check_collection(self.player, self.coins)
         for coin in collected:
             self.score += coin.value
+            self.coins.remove(coin)            # collect each coin exactly once
+            self.coins.append(self._random_coin())  # respawn so the round never runs out of coins
 
     def draw(self, surface, font):
         from game import renderer
