@@ -1,5 +1,5 @@
 """
-GameEngine: owns the player, coins and obstacles.
+GameEngine: owns the player, coins, obstacles, lives and the round timer.
 """
 
 import random
@@ -13,7 +13,8 @@ from game.renderer import WIDTH, HEIGHT
 NUM_COINS = 6
 NUM_OBSTACLES = 5
 START_LIVES = 3
-INVULN_MS = 1000  # invulnerability after a hit, in milliseconds
+INVULN_MS = 1000      # invulnerability after a hit, in milliseconds
+ROUND_SECONDS = 30    # length of a round
 
 # (name, value, color, spawn weight)
 COIN_TYPES = [
@@ -25,6 +26,10 @@ COIN_TYPES = [
 
 class GameEngine:
     def __init__(self):
+        self.reset()
+
+    def reset(self):
+        """Start a fresh round: score, lives, timer, coins and obstacles."""
         self.player = Player(x=WIDTH / 2, y=HEIGHT / 2)
         self.obstacles = self._make_obstacles()
         self.coins = [self._random_coin() for _ in range(NUM_COINS)]
@@ -32,6 +37,9 @@ class GameEngine:
         self.lives = START_LIVES
         self.invulnerable_until = 0
         self.game_over = False
+        self.end_reason = ""
+        self.round_start = pygame.time.get_ticks()
+        self.time_left = float(ROUND_SECONDS)
 
     def _make_obstacles(self):
         # keep the area around the player's start position clear
@@ -81,6 +89,16 @@ class GameEngine:
         if self.game_over:
             return
 
+        now = pygame.time.get_ticks()
+
+        # timer
+        elapsed = (now - self.round_start) / 1000
+        self.time_left = max(0.0, ROUND_SECONDS - elapsed)
+        if self.time_left <= 0:
+            self.game_over = True
+            self.end_reason = "TIME'S UP!"
+            return
+
         # coins: collected exactly once, then replaced
         collected = check_collection(self.player, self.coins)
         for coin in collected:
@@ -89,7 +107,6 @@ class GameEngine:
             self.coins.append(self._random_coin())
 
         # obstacles: lose one life per hit, then a short invulnerability window
-        now = pygame.time.get_ticks()
         if now >= self.invulnerable_until:
             player_rect = self.player.get_rect()
             if any(player_rect.colliderect(o) for o in self.obstacles):
@@ -97,15 +114,36 @@ class GameEngine:
                 self.invulnerable_until = now + INVULN_MS
                 if self.lives <= 0:
                     self.game_over = True
+                    self.end_reason = "OUT OF LIVES!"
 
     def draw(self, surface, font):
         from game import renderer
         now = pygame.time.get_ticks()
         # blink the player while invulnerable
-        blinking = now < self.invulnerable_until and (now // 100) % 2 == 0
+        blinking = (not self.game_over
+                    and now < self.invulnerable_until
+                    and (now // 100) % 2 == 0)
         renderer.draw_scene(surface, self.player, self.coins,
                             self.obstacles, show_player=not blinking)
+
+        # HUD
         renderer.draw_text(surface, font, f"Score: {self.score}", (10, 10))
+        renderer.draw_text(surface, font, f"Time: {int(self.time_left) + (1 if self.time_left % 1 else 0)}",
+                           (WIDTH // 2 - 45, 10))
         renderer.draw_text(surface, font, f"Lives: {self.lives}", (WIDTH - 130, 10))
+
+        # game over screen
         if self.game_over:
-            renderer.draw_banner(surface, font, f"GAME OVER - Score: {self.score}")
+            overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 160))
+            surface.blit(overlay, (0, 0))
+
+            cx, cy = WIDTH // 2, HEIGHT // 2
+            lines = [
+                (self.end_reason, (255, 220, 80), -50),
+                (f"Final Score: {self.score}", (255, 255, 255), 0),
+                ("Press R to play again", (180, 220, 255), 50),
+            ]
+            for text, color, offset in lines:
+                surf = font.render(text, True, color)
+                surface.blit(surf, surf.get_rect(center=(cx, cy + offset)))
